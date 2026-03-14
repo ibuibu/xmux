@@ -119,13 +119,15 @@ impl LayoutNode {
         }
     }
 
-    /// ペインID一覧を返す
+    /// ペインID一覧を返す（テスト用）
+    #[cfg(test)]
     pub fn pane_ids(&self) -> Vec<u32> {
         let mut ids = Vec::new();
         self.collect_pane_ids(&mut ids);
         ids
     }
 
+    #[cfg(test)]
     fn collect_pane_ids(&self, ids: &mut Vec<u32>) {
         match self {
             LayoutNode::Leaf { pane_id } => ids.push(*pane_id),

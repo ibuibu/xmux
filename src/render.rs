@@ -2,7 +2,7 @@ use crossterm::{cursor, queue, style, terminal};
 use std::io::Write;
 
 use crate::app::App;
-use crate::layout::{self, Rect, Split};
+use crate::layout::{Rect, Split};
 
 pub fn render<W: Write>(out: &mut W, app: &App) -> anyhow::Result<()> {
     let (term_cols, term_rows) = terminal::size()?;
@@ -23,6 +23,23 @@ pub fn render<W: Write>(out: &mut W, app: &App) -> anyhow::Result<()> {
     };
 
     let window = &app.windows[app.active_window_idx];
+
+    // ズームモード: アクティブペインのみ全画面描画
+    if let Some(zoomed_id) = window.zoomed_pane_id {
+        if let Some(pane) = window.panes.get(&zoomed_id) {
+            render_pane(out, pane, pane_area)?;
+            let screen = pane.screen();
+            let cursor_pos = screen.cursor_position();
+            let cx = pane_area.x + cursor_pos.1;
+            let cy = pane_area.y + cursor_pos.0;
+            if cx < pane_area.x + pane_area.width && cy < pane_area.y + pane_area.height {
+                queue!(out, cursor::MoveTo(cx, cy), cursor::Show)?;
+            }
+        }
+        out.flush()?;
+        return Ok(());
+    }
+
     let rects = window.layout.compute_rects(pane_area);
 
     // 各ペインの描画
@@ -32,37 +49,56 @@ pub fn render<W: Write>(out: &mut W, app: &App) -> anyhow::Result<()> {
         }
     }
 
-    // ペイン間のボーダー描画
+    // ペイン間のボーダー描画（セル単位でアクティブ判定）
     let borders = window.layout.compute_borders(pane_area);
     let active_rect = rects
         .iter()
         .find(|(id, _)| *id == window.active_pane_id)
         .map(|(_, r)| *r);
     for border in &borders {
-        let is_active = active_rect
-            .map(|r| is_border_adjacent(&r, border))
-            .unwrap_or(false);
-        let color = if is_active {
-            style::Color::Cyan
-        } else {
-            style::Color::DarkGrey
-        };
-        queue!(out, style::SetForegroundColor(color))?;
         match border.orientation {
             Split::Vertical => {
                 for i in 0..border.length {
+                    let by = border.y + i;
+                    let is_active = active_rect
+                        .map(|r| {
+                            let touches_x = r.x + r.width == border.x || r.x == border.x + 1;
+                            let in_y = by >= r.y && by < r.y + r.height;
+                            touches_x && in_y
+                        })
+                        .unwrap_or(false);
+                    let color = if is_active {
+                        style::Color::Cyan
+                    } else {
+                        style::Color::DarkGrey
+                    };
                     queue!(
                         out,
-                        cursor::MoveTo(border.x, border.y + i),
+                        cursor::MoveTo(border.x, by),
+                        style::SetForegroundColor(color),
                         style::Print("│")
                     )?;
                 }
             }
             Split::Horizontal => {
                 for i in 0..border.length {
+                    let bx = border.x + i;
+                    let is_active = active_rect
+                        .map(|r| {
+                            let touches_y = r.y + r.height == border.y || r.y == border.y + 1;
+                            let in_x = bx >= r.x && bx < r.x + r.width;
+                            touches_y && in_x
+                        })
+                        .unwrap_or(false);
+                    let color = if is_active {
+                        style::Color::Cyan
+                    } else {
+                        style::Color::DarkGrey
+                    };
                     queue!(
                         out,
-                        cursor::MoveTo(border.x + i, border.y),
+                        cursor::MoveTo(bx, border.y),
+                        style::SetForegroundColor(color),
                         style::Print("─")
                     )?;
                 }
@@ -142,26 +178,6 @@ fn render_pane<W: Write>(out: &mut W, pane: &crate::pane::Pane, rect: Rect) -> a
     }
 
     Ok(())
-}
-
-/// ペインのrectがボーダーに直接隣接しているか判定
-fn is_border_adjacent(rect: &Rect, border: &layout::Border) -> bool {
-    match border.orientation {
-        Split::Vertical => {
-            // 縦線: ペインの右端 or 左端がボーダーに接しているか
-            let touches = rect.x + rect.width == border.x || rect.x == border.x + 1;
-            // かつ縦方向でオーバーラップしているか
-            let v_overlap = rect.y < border.y + border.length && rect.y + rect.height > border.y;
-            touches && v_overlap
-        }
-        Split::Horizontal => {
-            // 横線: ペインの下端 or 上端がボーダーに接しているか
-            let touches = rect.y + rect.height == border.y || rect.y == border.y + 1;
-            // かつ横方向でオーバーラップしているか
-            let h_overlap = rect.x < border.x + border.length && rect.x + rect.width > border.x;
-            touches && h_overlap
-        }
-    }
 }
 
 fn convert_color(color: vt100::Color) -> style::Color {

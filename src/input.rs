@@ -25,6 +25,7 @@ pub enum Action {
     ResizeDown,
     ResizeLeft,
     ResizeRight,
+    ToggleZoom,
     NewWindow,
     SwitchWindow(usize),
     Quit,
@@ -63,6 +64,10 @@ fn default_bindings() -> BindingMap {
         (KeyModifiers::NONE, KeyCode::Char('c')),
         "new_window".into(),
     );
+    m.insert(
+        (KeyModifiers::NONE, KeyCode::Char('f')),
+        "toggle_zoom".into(),
+    );
     m.insert((KeyModifiers::NONE, KeyCode::Char('q')), "quit".into());
     m.insert((KeyModifiers::NONE, KeyCode::Up), "focus_up".into());
     m.insert((KeyModifiers::NONE, KeyCode::Down), "focus_down".into());
@@ -94,6 +99,7 @@ fn action_from_name(name: &str) -> Action {
         "resize_down" => Action::ResizeDown,
         "resize_left" => Action::ResizeLeft,
         "resize_right" => Action::ResizeRight,
+        "toggle_zoom" => Action::ToggleZoom,
         _ => Action::None,
     }
 }

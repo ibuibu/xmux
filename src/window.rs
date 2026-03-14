@@ -11,6 +11,7 @@ pub struct Window {
     pub panes: HashMap<u32, Pane>,
     pub layout: LayoutNode,
     pub active_pane_id: u32,
+    pub zoomed_pane_id: Option<u32>,
     event_tx: mpsc::UnboundedSender<AppEvent>,
 }
 
@@ -21,7 +22,7 @@ impl Window {
         rows: u16,
         event_tx: mpsc::UnboundedSender<AppEvent>,
     ) -> anyhow::Result<Self> {
-        let (pane, reader) = Pane::new(first_pane_id, cols, rows)?;
+        let (pane, reader) = Pane::new(cols, rows)?;
         let mut panes = HashMap::new();
         panes.insert(first_pane_id, pane);
 
@@ -31,6 +32,7 @@ impl Window {
             panes,
             layout: LayoutNode::single(first_pane_id),
             active_pane_id: first_pane_id,
+            zoomed_pane_id: None,
             event_tx,
         })
     }
@@ -73,7 +75,7 @@ impl Window {
                 height: 24,
             });
 
-        let (pane, reader) = Pane::new(new_pane_id, new_rect.width, new_rect.height)?;
+        let (pane, reader) = Pane::new(new_rect.width, new_rect.height)?;
         self.panes.insert(new_pane_id, pane);
         spawn_pty_reader(new_pane_id, reader, self.event_tx.clone());
 
@@ -83,6 +85,9 @@ impl Window {
     }
 
     pub fn close_pane(&mut self, pane_id: u32, pane_area: Rect) -> anyhow::Result<bool> {
+        if self.zoomed_pane_id == Some(pane_id) {
+            self.zoomed_pane_id = None;
+        }
         if self.panes.len() <= 1 {
             return Ok(false);
         }
@@ -110,6 +115,9 @@ impl Window {
     }
 
     pub fn move_focus(&mut self, direction: Direction, pane_area: Rect) {
+        if self.zoomed_pane_id.is_some() {
+            return;
+        }
         let rects = self.layout.compute_rects(pane_area);
 
         let active_rect = match rects.iter().find(|(id, _)| *id == self.active_pane_id) {

@@ -98,13 +98,17 @@ impl App {
                 }
             }
             Action::SplitVertical => {
+                self.active_window_mut().zoomed_pane_id = None;
                 let area = self.pane_area()?;
+                self.active_window_mut().resize_all_panes(area)?;
                 let id = self.alloc_pane_id();
                 self.active_window_mut()
                     .split_active_pane(Split::Vertical, area, id)?;
             }
             Action::SplitHorizontal => {
+                self.active_window_mut().zoomed_pane_id = None;
                 let area = self.pane_area()?;
+                self.active_window_mut().resize_all_panes(area)?;
                 let id = self.alloc_pane_id();
                 self.active_window_mut()
                     .split_active_pane(Split::Horizontal, area, id)?;
@@ -155,6 +159,21 @@ impl App {
                     self.active_window_idx = idx;
                     let area = self.pane_area()?;
                     self.active_window_mut().resize_all_panes(area)?;
+                }
+            }
+            Action::ToggleZoom => {
+                let window = self.active_window_mut();
+                if window.zoomed_pane_id.is_some() {
+                    window.zoomed_pane_id = None;
+                    let area = self.pane_area()?;
+                    self.active_window_mut().resize_all_panes(area)?;
+                } else {
+                    let pane_id = window.active_pane_id;
+                    window.zoomed_pane_id = Some(pane_id);
+                    let area = self.pane_area()?;
+                    if let Some(pane) = self.active_window_mut().panes.get_mut(&pane_id) {
+                        pane.resize(area.width, area.height)?;
+                    }
                 }
             }
             Action::Quit => return Ok(false),
@@ -211,6 +230,11 @@ impl App {
                     self.active_window_mut().resize_all_panes(area)?;
                 }
             }
+            return Ok(());
+        }
+
+        // ズーム中はペイン選択を無効化
+        if self.active_window().zoomed_pane_id.is_some() {
             return Ok(());
         }
 
