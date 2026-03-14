@@ -24,10 +24,13 @@ pub fn render<W: Write>(out: &mut W, app: &App) -> anyhow::Result<()> {
 
     let window = &app.windows[app.active_window_idx];
 
+    // 選択範囲の正規化
+    let selection = app.selection.map(|s| s.normalized());
+
     // ズームモード: アクティブペインのみ全画面描画
     if let Some(zoomed_id) = window.zoomed_pane_id {
         if let Some(pane) = window.panes.get(&zoomed_id) {
-            render_pane(out, pane, pane_area)?;
+            render_pane(out, pane, pane_area, selection)?;
             let screen = pane.screen();
             let cursor_pos = screen.cursor_position();
             let cx = pane_area.x + cursor_pos.1;
@@ -45,7 +48,7 @@ pub fn render<W: Write>(out: &mut W, app: &App) -> anyhow::Result<()> {
     // 各ペインの描画
     for (pane_id, rect) in &rects {
         if let Some(pane) = window.panes.get(pane_id) {
-            render_pane(out, pane, *rect)?;
+            render_pane(out, pane, *rect, selection)?;
         }
     }
 
@@ -125,7 +128,32 @@ pub fn render<W: Write>(out: &mut W, app: &App) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn render_pane<W: Write>(out: &mut W, pane: &crate::pane::Pane, rect: Rect) -> anyhow::Result<()> {
+/// 画面座標(col, row)が選択範囲内か判定
+fn is_selected(selection: Option<(u16, u16, u16, u16)>, screen_col: u16, screen_row: u16) -> bool {
+    let Some((sc, sr, ec, er)) = selection else {
+        return false;
+    };
+    if screen_row < sr || screen_row > er {
+        return false;
+    }
+    if screen_row == sr && screen_row == er {
+        return screen_col >= sc && screen_col <= ec;
+    }
+    if screen_row == sr {
+        return screen_col >= sc;
+    }
+    if screen_row == er {
+        return screen_col <= ec;
+    }
+    true
+}
+
+fn render_pane<W: Write>(
+    out: &mut W,
+    pane: &crate::pane::Pane,
+    rect: Rect,
+    selection: Option<(u16, u16, u16, u16)>,
+) -> anyhow::Result<()> {
     let screen = pane.screen();
 
     for row in 0..rect.height {
@@ -134,13 +162,24 @@ fn render_pane<W: Write>(out: &mut W, pane: &crate::pane::Pane, rect: Rect) -> a
         if row < pane.rows {
             let mut col = 0u16;
             while col < rect.width && col < pane.cols {
+                let screen_col = rect.x + col;
+                let screen_row = rect.y + row;
+                let selected = is_selected(selection, screen_col, screen_row);
+
                 let cell = screen.cell(row, col);
                 match cell {
                     Some(cell) => {
                         let fg = convert_color(cell.fgcolor());
                         let bg = convert_color(cell.bgcolor());
-                        queue!(out, style::SetForegroundColor(fg))?;
-                        queue!(out, style::SetBackgroundColor(bg))?;
+
+                        if selected {
+                            // 選択範囲: 色を反転
+                            queue!(out, style::SetForegroundColor(bg))?;
+                            queue!(out, style::SetBackgroundColor(style::Color::White))?;
+                        } else {
+                            queue!(out, style::SetForegroundColor(fg))?;
+                            queue!(out, style::SetBackgroundColor(bg))?;
+                        }
 
                         if cell.bold() {
                             queue!(out, style::SetAttribute(style::Attribute::Bold))?;
@@ -163,7 +202,16 @@ fn render_pane<W: Write>(out: &mut W, pane: &crate::pane::Pane, rect: Rect) -> a
                         queue!(out, style::SetAttribute(style::Attribute::Reset))?;
                     }
                     None => {
-                        queue!(out, style::Print(' '))?;
+                        if selected {
+                            queue!(
+                                out,
+                                style::SetBackgroundColor(style::Color::White),
+                                style::Print(' '),
+                                style::SetAttribute(style::Attribute::Reset)
+                            )?;
+                        } else {
+                            queue!(out, style::Print(' '))?;
+                        }
                     }
                 }
                 col += 1;

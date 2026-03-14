@@ -133,14 +133,27 @@ async fn run<W: Write>(out: &mut W, config: &Config) -> anyhow::Result<()> {
                         let _ = input_tx.send(AppEvent::KeyInput(key_event));
                     }
                 }
-                Event::Mouse(mouse_event) => {
-                    if mouse_event.kind == MouseEventKind::Down(MouseButton::Left) {
+                Event::Mouse(mouse_event) => match mouse_event.kind {
+                    MouseEventKind::Down(MouseButton::Left) => {
                         let _ = input_tx.send(AppEvent::MouseClick {
                             col: mouse_event.column,
                             row: mouse_event.row,
                         });
                     }
-                }
+                    MouseEventKind::Drag(MouseButton::Left) => {
+                        let _ = input_tx.send(AppEvent::MouseDrag {
+                            col: mouse_event.column,
+                            row: mouse_event.row,
+                        });
+                    }
+                    MouseEventKind::Up(MouseButton::Left) => {
+                        let _ = input_tx.send(AppEvent::MouseUp {
+                            col: mouse_event.column,
+                            row: mouse_event.row,
+                        });
+                    }
+                    _ => {}
+                },
                 Event::Resize(cols, rows) => {
                     let _ = input_tx.send(AppEvent::Resize { cols, rows });
                 }

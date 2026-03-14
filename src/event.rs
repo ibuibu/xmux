@@ -7,6 +7,14 @@ pub enum AppEvent {
         col: u16,
         row: u16,
     },
+    MouseDrag {
+        col: u16,
+        row: u16,
+    },
+    MouseUp {
+        col: u16,
+        row: u16,
+    },
     PtyOutput {
         pane_id: u32,
         data: Vec<u8>,

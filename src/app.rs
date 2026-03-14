@@ -9,10 +9,33 @@ use crate::render;
 use crate::sidebar::SidebarState;
 use crate::window::{Direction, Window};
 
+/// マウスドラッグ選択の状態
+#[derive(Debug, Clone, Copy)]
+pub struct Selection {
+    pub start_col: u16,
+    pub start_row: u16,
+    pub end_col: u16,
+    pub end_row: u16,
+}
+
+impl Selection {
+    /// 正規化（start <= end）された範囲を返す
+    pub fn normalized(&self) -> (u16, u16, u16, u16) {
+        if self.start_row < self.end_row
+            || (self.start_row == self.end_row && self.start_col <= self.end_col)
+        {
+            (self.start_col, self.start_row, self.end_col, self.end_row)
+        } else {
+            (self.end_col, self.end_row, self.start_col, self.start_row)
+        }
+    }
+}
+
 pub struct App {
     pub windows: Vec<Window>,
     pub active_window_idx: usize,
     pub sidebar: SidebarState,
+    pub selection: Option<Selection>,
     next_pane_id: u32,
     input_handler: InputHandler,
     event_tx: mpsc::UnboundedSender<AppEvent>,
@@ -30,6 +53,7 @@ impl App {
             windows: vec![window],
             active_window_idx: 0,
             sidebar,
+            selection: None,
             next_pane_id: 1,
             input_handler: InputHandler::new(config),
             event_tx,
@@ -82,7 +106,16 @@ impl App {
                 return Ok(true);
             }
             AppEvent::MouseClick { col, row } => {
+                self.selection = None;
                 self.handle_mouse_click(*col, *row)?;
+                return Ok(true);
+            }
+            AppEvent::MouseDrag { col, row } => {
+                self.handle_mouse_drag(*col, *row);
+                return Ok(true);
+            }
+            AppEvent::MouseUp { col, row } => {
+                self.handle_mouse_up(*col, *row);
                 return Ok(true);
             }
             AppEvent::ExternalNotification { window, .. } => {
@@ -290,7 +323,152 @@ impl App {
         Ok(())
     }
 
+    fn handle_mouse_drag(&mut self, col: u16, row: u16) {
+        match self.selection {
+            Some(ref mut sel) => {
+                sel.end_col = col;
+                sel.end_row = row;
+            }
+            None => {
+                self.selection = Some(Selection {
+                    start_col: col,
+                    start_row: row,
+                    end_col: col,
+                    end_row: row,
+                });
+            }
+        }
+    }
+
+    fn handle_mouse_up(&mut self, col: u16, row: u16) {
+        if let Some(ref mut sel) = self.selection {
+            sel.end_col = col;
+            sel.end_row = row;
+        }
+        if let Some(sel) = self.selection {
+            let text = self.extract_selected_text(sel.normalized());
+            if !text.is_empty() {
+                copy_to_clipboard(&text);
+            }
+        }
+        self.selection = None;
+    }
+
+    /// 選択範囲のテキストをペインのvt100スクリーンから抽出
+    fn extract_selected_text(&self, (sc, sr, ec, er): (u16, u16, u16, u16)) -> String {
+        let window = self.active_window();
+        let pane_area = match self.pane_area() {
+            Ok(a) => a,
+            Err(_) => return String::new(),
+        };
+
+        // ズームモードならアクティブペインから直接取得
+        if let Some(zoomed_id) = window.zoomed_pane_id {
+            if let Some(pane) = window.panes.get(&zoomed_id) {
+                return extract_text_from_pane(pane, pane_area, sc, sr, ec, er);
+            }
+        }
+
+        // 選択開始位置が含まれるペインを特定
+        let rects = window.layout.compute_rects(pane_area);
+        for (pane_id, rect) in &rects {
+            if sc >= rect.x && sc < rect.x + rect.width && sr >= rect.y && sr < rect.y + rect.height
+            {
+                if let Some(pane) = window.panes.get(pane_id) {
+                    return extract_text_from_pane(pane, *rect, sc, sr, ec, er);
+                }
+            }
+        }
+
+        String::new()
+    }
+
     pub fn render<W: std::io::Write>(&self, out: &mut W) -> anyhow::Result<()> {
         render::render(out, self)
+    }
+}
+
+fn extract_text_from_pane(
+    pane: &crate::pane::Pane,
+    rect: Rect,
+    sc: u16,
+    sr: u16,
+    ec: u16,
+    er: u16,
+) -> String {
+    let screen = pane.screen();
+    let mut lines = Vec::new();
+
+    // 選択範囲をペインローカル座標にクランプ
+    let clamp_col = |c: u16| c.saturating_sub(rect.x).min(pane.cols.saturating_sub(1));
+    let clamp_row = |r: u16| r.saturating_sub(rect.y).min(pane.rows.saturating_sub(1));
+
+    let r_start = clamp_row(sr);
+    let r_end = clamp_row(er);
+
+    for r in r_start..=r_end {
+        let c_start = if r == r_start { clamp_col(sc) } else { 0 };
+        let c_end = if r == r_end {
+            clamp_col(ec)
+        } else {
+            pane.cols.saturating_sub(1)
+        };
+
+        let mut line = String::new();
+        let mut col = c_start;
+        while col <= c_end {
+            if let Some(cell) = screen.cell(r, col) {
+                let contents = cell.contents();
+                if contents.is_empty() {
+                    line.push(' ');
+                } else {
+                    line.push_str(&contents);
+                    let w = unicode_width::UnicodeWidthStr::width(contents.as_str());
+                    if w > 1 {
+                        col += w as u16 - 1;
+                    }
+                }
+            } else {
+                line.push(' ');
+            }
+            col += 1;
+        }
+        lines.push(line.trim_end().to_string());
+    }
+
+    // 末尾の空行を除去
+    while lines.last().map_or(false, |l| l.is_empty()) {
+        lines.pop();
+    }
+
+    lines.join("\n")
+}
+
+fn copy_to_clipboard(text: &str) {
+    use std::io::Write as IoWrite;
+    use std::process::{Command, Stdio};
+
+    // WSL → clip.exe, Wayland → wl-copy, X11 → xclip/xsel
+    let candidates: &[&[&str]] = &[
+        &["clip.exe"],
+        &["wl-copy"],
+        &["xclip", "-selection", "clipboard"],
+        &["xsel", "--clipboard", "--input"],
+    ];
+
+    for cmd in candidates {
+        if let Ok(mut child) = Command::new(cmd[0])
+            .args(&cmd[1..])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            let _ = child.wait();
+            return;
+        }
     }
 }
