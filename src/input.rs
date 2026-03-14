@@ -1,4 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use std::collections::HashMap;
 
 use crate::config::Config;
 use crate::event::AppEvent;
@@ -30,18 +31,88 @@ pub enum Action {
     None,
 }
 
+/// (KeyModifiers, KeyCode) → Action名 のマッピング
+type BindingMap = HashMap<(KeyModifiers, KeyCode), String>;
+
 pub struct InputHandler {
     pub mode: InputMode,
     prefix_key: KeyCode,
     prefix_modifiers: KeyModifiers,
+    bindings: BindingMap,
+}
+
+fn default_bindings() -> BindingMap {
+    let mut m = HashMap::new();
+    m.insert(
+        (KeyModifiers::NONE, KeyCode::Char('%')),
+        "split_vertical".into(),
+    );
+    m.insert(
+        (KeyModifiers::NONE, KeyCode::Char('"')),
+        "split_horizontal".into(),
+    );
+    m.insert(
+        (KeyModifiers::NONE, KeyCode::Char('x')),
+        "close_pane".into(),
+    );
+    m.insert(
+        (KeyModifiers::NONE, KeyCode::Char('z')),
+        "toggle_sidebar".into(),
+    );
+    m.insert(
+        (KeyModifiers::NONE, KeyCode::Char('c')),
+        "new_window".into(),
+    );
+    m.insert((KeyModifiers::NONE, KeyCode::Char('q')), "quit".into());
+    m.insert((KeyModifiers::NONE, KeyCode::Up), "focus_up".into());
+    m.insert((KeyModifiers::NONE, KeyCode::Down), "focus_down".into());
+    m.insert((KeyModifiers::NONE, KeyCode::Left), "focus_left".into());
+    m.insert((KeyModifiers::NONE, KeyCode::Right), "focus_right".into());
+    m.insert((KeyModifiers::CONTROL, KeyCode::Up), "resize_up".into());
+    m.insert((KeyModifiers::CONTROL, KeyCode::Down), "resize_down".into());
+    m.insert((KeyModifiers::CONTROL, KeyCode::Left), "resize_left".into());
+    m.insert(
+        (KeyModifiers::CONTROL, KeyCode::Right),
+        "resize_right".into(),
+    );
+    m
+}
+
+fn action_from_name(name: &str) -> Action {
+    match name {
+        "split_vertical" => Action::SplitVertical,
+        "split_horizontal" => Action::SplitHorizontal,
+        "close_pane" => Action::ClosePane,
+        "toggle_sidebar" => Action::ToggleSidebar,
+        "new_window" => Action::NewWindow,
+        "quit" => Action::Quit,
+        "focus_up" => Action::FocusUp,
+        "focus_down" => Action::FocusDown,
+        "focus_left" => Action::FocusLeft,
+        "focus_right" => Action::FocusRight,
+        "resize_up" => Action::ResizeUp,
+        "resize_down" => Action::ResizeDown,
+        "resize_left" => Action::ResizeLeft,
+        "resize_right" => Action::ResizeRight,
+        _ => Action::None,
+    }
 }
 
 impl InputHandler {
     pub fn new(config: &Config) -> Self {
+        let mut bindings = default_bindings();
+        // configのbindingsでデフォルトを上書き
+        for (action_name, (mods, key)) in &config.bindings {
+            // まず同じaction名の既存バインドを削除
+            bindings.retain(|_, v| v != action_name);
+            // 新しいバインドを追加
+            bindings.insert((*mods, *key), action_name.clone());
+        }
         Self {
             mode: InputMode::Normal,
             prefix_key: config.prefix_key,
             prefix_modifiers: config.prefix_modifiers,
+            bindings,
         }
     }
 
@@ -63,25 +134,17 @@ impl InputHandler {
             }
             InputMode::Prefix => {
                 self.mode = InputMode::Normal;
-                match key.code {
-                    KeyCode::Char('%') => Action::SplitVertical,
-                    KeyCode::Char('"') => Action::SplitHorizontal,
-                    KeyCode::Char('x') => Action::ClosePane,
-                    KeyCode::Char('z') => Action::ToggleSidebar,
-                    KeyCode::Char('c') => Action::NewWindow,
-                    KeyCode::Char('q') => Action::Quit,
-                    KeyCode::Char(c @ '1'..='9') => {
-                        Action::SwitchWindow((c as usize) - ('1' as usize))
+                // prefix + 数字 → Window切り替え（常に有効）
+                if let KeyCode::Char(c @ '1'..='9') = key.code {
+                    if key.modifiers == KeyModifiers::NONE {
+                        return Action::SwitchWindow((c as usize) - ('1' as usize));
                     }
-                    KeyCode::Up if key.modifiers == KeyModifiers::NONE => Action::FocusUp,
-                    KeyCode::Down if key.modifiers == KeyModifiers::NONE => Action::FocusDown,
-                    KeyCode::Left if key.modifiers == KeyModifiers::NONE => Action::FocusLeft,
-                    KeyCode::Right if key.modifiers == KeyModifiers::NONE => Action::FocusRight,
-                    KeyCode::Up if key.modifiers == KeyModifiers::CONTROL => Action::ResizeUp,
-                    KeyCode::Down if key.modifiers == KeyModifiers::CONTROL => Action::ResizeDown,
-                    KeyCode::Left if key.modifiers == KeyModifiers::CONTROL => Action::ResizeLeft,
-                    KeyCode::Right if key.modifiers == KeyModifiers::CONTROL => Action::ResizeRight,
-                    _ => Action::None,
+                }
+                // bindingsマップから検索
+                if let Some(action_name) = self.bindings.get(&(key.modifiers, key.code)) {
+                    action_from_name(action_name)
+                } else {
+                    Action::None
                 }
             }
         }
@@ -120,6 +183,7 @@ pub fn key_to_bytes(key: KeyEvent) -> Vec<u8> {
 mod tests {
     use super::*;
     use crossterm::event::KeyEventState;
+    use std::collections::HashMap;
 
     fn make_key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
         KeyEvent {
@@ -161,6 +225,7 @@ mod tests {
         let config = Config {
             prefix_key: KeyCode::Char('a'),
             prefix_modifiers: KeyModifiers::CONTROL,
+            bindings: HashMap::new(),
         };
         let mut handler = InputHandler::new(&config);
 
@@ -373,5 +438,31 @@ mod tests {
                 ch
             );
         }
+    }
+
+    #[test]
+    fn custom_bindings_override_defaults() {
+        let mut bindings = HashMap::new();
+        // split_verticalを'v'に変更
+        bindings.insert(
+            "split_vertical".to_string(),
+            (KeyModifiers::NONE, KeyCode::Char('v')),
+        );
+        let config = Config {
+            prefix_key: KeyCode::Char('b'),
+            prefix_modifiers: KeyModifiers::CONTROL,
+            bindings,
+        };
+        let mut handler = InputHandler::new(&config);
+        handler.mode = InputMode::Prefix;
+
+        // 'v'でsplit_verticalが発火する
+        let action = handler.handle(&make_event(KeyCode::Char('v'), KeyModifiers::NONE));
+        assert!(matches!(action, Action::SplitVertical));
+
+        // 元の'%'はもう効かない
+        handler.mode = InputMode::Prefix;
+        let action = handler.handle(&make_event(KeyCode::Char('%'), KeyModifiers::NONE));
+        assert!(matches!(action, Action::None));
     }
 }

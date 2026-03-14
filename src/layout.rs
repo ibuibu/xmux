@@ -165,7 +165,6 @@ impl LayoutNode {
             let (first_area, second_area) = split_rect(area, *direction, *ratio);
             match direction {
                 Split::Vertical => {
-                    // 縦線: first_area の右端 + 1 の位置
                     borders.push(Border {
                         x: first_area.x + first_area.width,
                         y: area.y,
@@ -174,7 +173,6 @@ impl LayoutNode {
                     });
                 }
                 Split::Horizontal => {
-                    // 横線: first_area の下端 + 1 の位置
                     borders.push(Border {
                         x: area.x,
                         y: first_area.y + first_area.height,

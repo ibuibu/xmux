@@ -1,16 +1,19 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[derive(Debug, Deserialize)]
 pub struct ConfigFile {
     pub prefix: Option<String>,
+    pub bindings: Option<HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Config {
     pub prefix_key: KeyCode,
     pub prefix_modifiers: KeyModifiers,
+    pub bindings: HashMap<String, (KeyModifiers, KeyCode)>,
 }
 
 impl Default for Config {
@@ -18,6 +21,7 @@ impl Default for Config {
         Self {
             prefix_key: KeyCode::Char('b'),
             prefix_modifiers: KeyModifiers::CONTROL,
+            bindings: HashMap::new(),
         }
     }
 }
@@ -33,6 +37,13 @@ impl Config {
                         if let Some((mods, key)) = parse_key_binding(&prefix) {
                             config.prefix_modifiers = mods;
                             config.prefix_key = key;
+                        }
+                    }
+                    if let Some(bindings) = file.bindings {
+                        for (action, key_str) in bindings {
+                            if let Some(parsed) = parse_key_binding(&key_str) {
+                                config.bindings.insert(action, parsed);
+                            }
                         }
                     }
                     config
@@ -51,8 +62,8 @@ fn config_path() -> PathBuf {
         .join("config.toml")
 }
 
-/// "C-a", "C-b", "C-Space" のようなキーバインド文字列をパースする
-fn parse_key_binding(s: &str) -> Option<(KeyModifiers, KeyCode)> {
+/// "C-a", "C-b", "C-Space", "Up", "C-Left" のようなキーバインド文字列をパースする
+pub fn parse_key_binding(s: &str) -> Option<(KeyModifiers, KeyCode)> {
     let s = s.trim();
     let parts: Vec<&str> = s.split('-').collect();
 
@@ -83,6 +94,13 @@ fn parse_key_binding(s: &str) -> Option<(KeyModifiers, KeyCode)> {
         "esc" | "escape" => KeyCode::Esc,
         "tab" => KeyCode::Tab,
         "backspace" | "bs" => KeyCode::Backspace,
+        "up" => KeyCode::Up,
+        "down" => KeyCode::Down,
+        "left" => KeyCode::Left,
+        "right" => KeyCode::Right,
+        "home" => KeyCode::Home,
+        "end" => KeyCode::End,
+        "delete" | "del" => KeyCode::Delete,
         s if s.len() == 1 => KeyCode::Char(s.chars().next().unwrap()),
         _ => return None,
     };
@@ -162,5 +180,22 @@ mod tests {
         let (mods, key) = parse_key_binding("  C-a  ").unwrap();
         assert_eq!(mods, KeyModifiers::CONTROL);
         assert_eq!(key, KeyCode::Char('a'));
+    }
+
+    #[test]
+    fn parse_arrow_keys() {
+        let (mods, key) = parse_key_binding("Up").unwrap();
+        assert_eq!(mods, KeyModifiers::NONE);
+        assert_eq!(key, KeyCode::Up);
+
+        let (mods, key) = parse_key_binding("C-Left").unwrap();
+        assert_eq!(mods, KeyModifiers::CONTROL);
+        assert_eq!(key, KeyCode::Left);
+    }
+
+    #[test]
+    fn default_config_has_empty_bindings() {
+        let config = Config::default();
+        assert!(config.bindings.is_empty());
     }
 }

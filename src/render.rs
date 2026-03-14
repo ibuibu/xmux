@@ -2,7 +2,7 @@ use crossterm::{cursor, queue, style, terminal};
 use std::io::Write;
 
 use crate::app::App;
-use crate::layout::{Rect, Split};
+use crate::layout::{self, Rect, Split};
 
 pub fn render<W: Write>(out: &mut W, app: &App) -> anyhow::Result<()> {
     let (term_cols, term_rows) = terminal::size()?;
@@ -34,8 +34,20 @@ pub fn render<W: Write>(out: &mut W, app: &App) -> anyhow::Result<()> {
 
     // ペイン間のボーダー描画
     let borders = window.layout.compute_borders(pane_area);
-    queue!(out, style::SetForegroundColor(style::Color::DarkGrey))?;
+    let active_rect = rects
+        .iter()
+        .find(|(id, _)| *id == window.active_pane_id)
+        .map(|(_, r)| *r);
     for border in &borders {
+        let is_active = active_rect
+            .map(|r| is_border_adjacent(&r, border))
+            .unwrap_or(false);
+        let color = if is_active {
+            style::Color::Cyan
+        } else {
+            style::Color::DarkGrey
+        };
+        queue!(out, style::SetForegroundColor(color))?;
         match border.orientation {
             Split::Vertical => {
                 for i in 0..border.length {
@@ -130,6 +142,26 @@ fn render_pane<W: Write>(out: &mut W, pane: &crate::pane::Pane, rect: Rect) -> a
     }
 
     Ok(())
+}
+
+/// ペインのrectがボーダーに直接隣接しているか判定
+fn is_border_adjacent(rect: &Rect, border: &layout::Border) -> bool {
+    match border.orientation {
+        Split::Vertical => {
+            // 縦線: ペインの右端 or 左端がボーダーに接しているか
+            let touches = rect.x + rect.width == border.x || rect.x == border.x + 1;
+            // かつ縦方向でオーバーラップしているか
+            let v_overlap = rect.y < border.y + border.length && rect.y + rect.height > border.y;
+            touches && v_overlap
+        }
+        Split::Horizontal => {
+            // 横線: ペインの下端 or 上端がボーダーに接しているか
+            let touches = rect.y + rect.height == border.y || rect.y == border.y + 1;
+            // かつ横方向でオーバーラップしているか
+            let h_overlap = rect.x < border.x + border.length && rect.x + rect.width > border.x;
+            touches && h_overlap
+        }
+    }
 }
 
 fn convert_color(color: vt100::Color) -> style::Color {

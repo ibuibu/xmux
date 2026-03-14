@@ -10,7 +10,10 @@ mod window;
 
 use std::io::{Write, stdout};
 
-use crossterm::event::{Event, EventStream, KeyEventKind};
+use crossterm::event::{
+    DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyEventKind, MouseButton,
+    MouseEventKind,
+};
 use crossterm::execute;
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use tokio::sync::mpsc;
@@ -26,12 +29,11 @@ async fn main() -> anyhow::Result<()> {
     let mut stdout = stdout();
 
     terminal::enable_raw_mode()?;
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
 
     let result = run(&mut stdout, &config).await;
 
-    // クリーンアップ
-    execute!(stdout, LeaveAlternateScreen)?;
+    execute!(stdout, DisableMouseCapture, LeaveAlternateScreen)?;
     terminal::disable_raw_mode()?;
 
     result
@@ -43,16 +45,22 @@ async fn run<W: Write>(out: &mut W, config: &Config) -> anyhow::Result<()> {
     let mut app = App::new(tx.clone(), config)?;
     app.render(out)?;
 
-    // crossterm EventStreamからキー入力を読み取るタスク
     let input_tx = tx.clone();
     tokio::spawn(async move {
         let mut reader = EventStream::new();
         while let Some(Ok(event)) = reader.next().await {
             match event {
                 Event::Key(key_event) => {
-                    // Press イベントのみ処理（Release/Repeat無視）
                     if key_event.kind == KeyEventKind::Press {
                         let _ = input_tx.send(AppEvent::KeyInput(key_event));
+                    }
+                }
+                Event::Mouse(mouse_event) => {
+                    if mouse_event.kind == MouseEventKind::Down(MouseButton::Left) {
+                        let _ = input_tx.send(AppEvent::MouseClick {
+                            col: mouse_event.column,
+                            row: mouse_event.row,
+                        });
                     }
                 }
                 Event::Resize(cols, rows) => {
@@ -63,7 +71,6 @@ async fn run<W: Write>(out: &mut W, config: &Config) -> anyhow::Result<()> {
         }
     });
 
-    // メインイベントループ
     while let Some(event) = rx.recv().await {
         let should_continue = app.update(event)?;
         if !should_continue {

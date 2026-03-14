@@ -81,6 +81,10 @@ impl App {
                 self.handle_resize(*cols, *rows)?;
                 return Ok(true);
             }
+            AppEvent::MouseClick { col, row } => {
+                self.handle_mouse_click(*col, *row)?;
+                return Ok(true);
+            }
             _ => {}
         }
 
@@ -191,6 +195,41 @@ impl App {
         }
 
         Ok(true)
+    }
+
+    fn handle_mouse_click(&mut self, col: u16, row: u16) -> anyhow::Result<()> {
+        let sidebar_width = self.sidebar.effective_width();
+
+        // サイドバー領域のクリック → Window切り替え
+        if col < sidebar_width {
+            // row=0はヘッダー、row=1は区切り線、row=2以降がWindow一覧
+            if row >= 2 {
+                let idx = (row - 2) as usize;
+                if idx < self.windows.len() {
+                    self.active_window_idx = idx;
+                    let area = self.pane_area()?;
+                    self.active_window_mut().resize_all_panes(area)?;
+                }
+            }
+            return Ok(());
+        }
+
+        // ペイン領域のクリック → ペイン選択
+        let area = self.pane_area()?;
+        let window = &self.windows[self.active_window_idx];
+        let rects = window.layout.compute_rects(area);
+        for (pane_id, rect) in &rects {
+            if col >= rect.x
+                && col < rect.x + rect.width
+                && row >= rect.y
+                && row < rect.y + rect.height
+            {
+                self.active_window_mut().active_pane_id = *pane_id;
+                break;
+            }
+        }
+
+        Ok(())
     }
 
     fn handle_resize(&mut self, cols: u16, rows: u16) -> anyhow::Result<()> {
