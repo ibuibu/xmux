@@ -11,3 +11,6 @@ vt100 = "0.15"
 unicode-width = "0.2"
 tokio-stream = "0.1"
 anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+dirs = "6"

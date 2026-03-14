@@ -1,5 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::config::Config;
 use crate::event::AppEvent;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,12 +30,16 @@ pub enum Action {
 
 pub struct InputHandler {
     pub mode: InputMode,
+    prefix_key: KeyCode,
+    prefix_modifiers: KeyModifiers,
 }
 
 impl InputHandler {
-    pub fn new() -> Self {
+    pub fn new(config: &Config) -> Self {
         Self {
             mode: InputMode::Normal,
+            prefix_key: config.prefix_key,
+            prefix_modifiers: config.prefix_modifiers,
         }
     }
 
@@ -48,12 +53,10 @@ impl InputHandler {
     fn handle_key(&mut self, key: KeyEvent) -> Action {
         match self.mode {
             InputMode::Normal => {
-                // Ctrl-b → プレフィックスモードに入る
-                if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('b') {
+                if key.modifiers == self.prefix_modifiers && key.code == self.prefix_key {
                     self.mode = InputMode::Prefix;
                     return Action::None;
                 }
-                // それ以外はPTYに転送
                 Action::ForwardToPty(key_to_bytes(key))
             }
             InputMode::Prefix => {
@@ -125,9 +128,13 @@ mod tests {
         AppEvent::KeyInput(make_key(code, modifiers))
     }
 
+    fn default_handler() -> InputHandler {
+        InputHandler::new(&Config::default())
+    }
+
     #[test]
     fn normal_mode_forwards_regular_keys() {
-        let mut handler = InputHandler::new();
+        let mut handler = default_handler();
         let event = make_event(KeyCode::Char('a'), KeyModifiers::NONE);
         let action = handler.handle(&event);
         assert!(matches!(action, Action::ForwardToPty(ref data) if data == b"a"));
@@ -136,7 +143,7 @@ mod tests {
 
     #[test]
     fn ctrl_b_enters_prefix_mode() {
-        let mut handler = InputHandler::new();
+        let mut handler = default_handler();
         let event = make_event(KeyCode::Char('b'), KeyModifiers::CONTROL);
         let action = handler.handle(&event);
         assert!(matches!(action, Action::None));
@@ -144,8 +151,28 @@ mod tests {
     }
 
     #[test]
+    fn custom_prefix_ctrl_a() {
+        let config = Config {
+            prefix_key: KeyCode::Char('a'),
+            prefix_modifiers: KeyModifiers::CONTROL,
+        };
+        let mut handler = InputHandler::new(&config);
+
+        // Ctrl-aでprefixモードに入る
+        let action = handler.handle(&make_event(KeyCode::Char('a'), KeyModifiers::CONTROL));
+        assert!(matches!(action, Action::None));
+        assert_eq!(handler.mode, InputMode::Prefix);
+
+        // Ctrl-bは通常キーとしてPTYに転送される
+        let mut handler = InputHandler::new(&config);
+        let action = handler.handle(&make_event(KeyCode::Char('b'), KeyModifiers::CONTROL));
+        assert!(matches!(action, Action::ForwardToPty(_)));
+        assert_eq!(handler.mode, InputMode::Normal);
+    }
+
+    #[test]
     fn prefix_percent_splits_vertical() {
-        let mut handler = InputHandler::new();
+        let mut handler = default_handler();
         handler.mode = InputMode::Prefix;
         let event = make_event(KeyCode::Char('%'), KeyModifiers::NONE);
         let action = handler.handle(&event);
@@ -155,7 +182,7 @@ mod tests {
 
     #[test]
     fn prefix_quote_splits_horizontal() {
-        let mut handler = InputHandler::new();
+        let mut handler = default_handler();
         handler.mode = InputMode::Prefix;
         let event = make_event(KeyCode::Char('"'), KeyModifiers::NONE);
         let action = handler.handle(&event);
@@ -165,7 +192,7 @@ mod tests {
 
     #[test]
     fn prefix_x_closes_pane() {
-        let mut handler = InputHandler::new();
+        let mut handler = default_handler();
         handler.mode = InputMode::Prefix;
         let event = make_event(KeyCode::Char('x'), KeyModifiers::NONE);
         let action = handler.handle(&event);
@@ -174,7 +201,7 @@ mod tests {
 
     #[test]
     fn prefix_z_toggles_sidebar() {
-        let mut handler = InputHandler::new();
+        let mut handler = default_handler();
         handler.mode = InputMode::Prefix;
         let event = make_event(KeyCode::Char('z'), KeyModifiers::NONE);
         let action = handler.handle(&event);
@@ -183,7 +210,7 @@ mod tests {
 
     #[test]
     fn prefix_q_quits() {
-        let mut handler = InputHandler::new();
+        let mut handler = default_handler();
         handler.mode = InputMode::Prefix;
         let event = make_event(KeyCode::Char('q'), KeyModifiers::NONE);
         let action = handler.handle(&event);
@@ -199,7 +226,7 @@ mod tests {
             (KeyCode::Right, Action::FocusRight),
         ];
         for (code, expected) in cases {
-            let mut handler = InputHandler::new();
+            let mut handler = default_handler();
             handler.mode = InputMode::Prefix;
             let event = make_event(code, KeyModifiers::NONE);
             let action = handler.handle(&event);
@@ -220,7 +247,7 @@ mod tests {
             (KeyCode::Right, Action::ResizeRight),
         ];
         for (code, expected) in cases {
-            let mut handler = InputHandler::new();
+            let mut handler = default_handler();
             handler.mode = InputMode::Prefix;
             let event = make_event(code, KeyModifiers::CONTROL);
             let action = handler.handle(&event);
@@ -233,7 +260,7 @@ mod tests {
 
     #[test]
     fn prefix_unknown_key_returns_none_and_exits_prefix() {
-        let mut handler = InputHandler::new();
+        let mut handler = default_handler();
         handler.mode = InputMode::Prefix;
         let event = make_event(KeyCode::Char('?'), KeyModifiers::NONE);
         let action = handler.handle(&event);
@@ -243,7 +270,7 @@ mod tests {
 
     #[test]
     fn non_key_event_returns_none() {
-        let mut handler = InputHandler::new();
+        let mut handler = default_handler();
         let event = AppEvent::Resize { cols: 80, rows: 24 };
         let action = handler.handle(&event);
         assert!(matches!(action, Action::None));
@@ -257,10 +284,8 @@ mod tests {
 
     #[test]
     fn key_to_bytes_ctrl_char() {
-        // Ctrl+a → 0x01
         let key = make_key(KeyCode::Char('a'), KeyModifiers::CONTROL);
         assert_eq!(key_to_bytes(key), vec![1]);
-        // Ctrl+c → 0x03
         let key = make_key(KeyCode::Char('c'), KeyModifiers::CONTROL);
         assert_eq!(key_to_bytes(key), vec![3]);
     }
@@ -307,19 +332,16 @@ mod tests {
 
     #[test]
     fn full_sequence_ctrl_b_then_percent() {
-        let mut handler = InputHandler::new();
+        let mut handler = default_handler();
 
-        // Ctrl-b
         let action = handler.handle(&make_event(KeyCode::Char('b'), KeyModifiers::CONTROL));
         assert!(matches!(action, Action::None));
         assert_eq!(handler.mode, InputMode::Prefix);
 
-        // %
         let action = handler.handle(&make_event(KeyCode::Char('%'), KeyModifiers::NONE));
         assert!(matches!(action, Action::SplitVertical));
         assert_eq!(handler.mode, InputMode::Normal);
 
-        // 次の通常キーはPTYに転送される
         let action = handler.handle(&make_event(KeyCode::Char('l'), KeyModifiers::NONE));
         assert!(matches!(action, Action::ForwardToPty(ref data) if data == b"l"));
     }

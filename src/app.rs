@@ -4,6 +4,7 @@ use std::io::Read as IoRead;
 use crossterm::terminal;
 use tokio::sync::mpsc;
 
+use crate::config::Config;
 use crate::event::AppEvent;
 use crate::input::{Action, InputHandler};
 use crate::layout::{LayoutNode, Rect, Split};
@@ -22,7 +23,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(event_tx: mpsc::UnboundedSender<AppEvent>) -> anyhow::Result<Self> {
+    pub fn new(event_tx: mpsc::UnboundedSender<AppEvent>, config: &Config) -> anyhow::Result<Self> {
         let (term_cols, term_rows) = terminal::size()?;
         let sidebar = SidebarState::new();
         let pane_cols = term_cols.saturating_sub(sidebar.effective_width());
@@ -41,7 +42,7 @@ impl App {
             sidebar,
             active_pane_id: pane_id,
             next_pane_id: 1,
-            input_handler: InputHandler::new(),
+            input_handler: InputHandler::new(config),
             event_tx: event_tx.clone(),
         };
 
