@@ -65,6 +65,12 @@ fn config_path() -> PathBuf {
 /// "C-a", "C-b", "C-Space", "Up", "C-Left" のようなキーバインド文字列をパースする
 pub fn parse_key_binding(s: &str) -> Option<(KeyModifiers, KeyCode)> {
     let s = s.trim();
+
+    // 1文字のキーはそのまま返す（"-" 等の区切り文字対策）
+    if s.len() == 1 {
+        return Some((KeyModifiers::NONE, KeyCode::Char(s.chars().next().unwrap())));
+    }
+
     let parts: Vec<&str> = s.split('-').collect();
 
     let mut modifiers = KeyModifiers::NONE;
@@ -197,5 +203,12 @@ mod tests {
     fn default_config_has_empty_bindings() {
         let config = Config::default();
         assert!(config.bindings.is_empty());
+    }
+
+    #[test]
+    fn parse_hyphen_key() {
+        let (mods, key) = parse_key_binding("-").unwrap();
+        assert_eq!(mods, KeyModifiers::NONE);
+        assert_eq!(key, KeyCode::Char('-'));
     }
 }
