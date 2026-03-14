@@ -33,4 +33,5 @@ pub enum AppEvent {
         body: String,
         window: Option<usize>,
     },
+    ToastExpired,
 }

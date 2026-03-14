@@ -31,6 +31,7 @@ pub fn render<W: Write>(out: &mut W, app: &App) -> anyhow::Result<()> {
     if let Some(zoomed_id) = window.zoomed_pane_id {
         if let Some(pane) = window.panes.get(&zoomed_id) {
             render_pane(out, pane, pane_area, selection)?;
+            render_toast(out, &app.toast, term_cols, term_rows)?;
             let screen = pane.screen();
             let cursor_pos = screen.cursor_position();
             let cx = pane_area.x + cursor_pos.1;
@@ -109,6 +110,9 @@ pub fn render<W: Write>(out: &mut W, app: &App) -> anyhow::Result<()> {
         }
     }
     queue!(out, style::ResetColor)?;
+
+    // トースト描画
+    render_toast(out, &app.toast, term_cols, term_rows)?;
 
     // アクティブペインのカーソル位置にカーソルを表示
     if let Some(active_rect) = rects.iter().find(|(id, _)| *id == window.active_pane_id) {
@@ -225,6 +229,30 @@ fn render_pane<W: Write>(
         }
     }
 
+    Ok(())
+}
+
+/// 画面右下にトーストメッセージを描画
+fn render_toast<W: Write>(
+    out: &mut W,
+    toast: &Option<String>,
+    term_cols: u16,
+    term_rows: u16,
+) -> anyhow::Result<()> {
+    if let Some(msg) = toast {
+        let padded = format!(" {} ", msg);
+        let width = padded.len() as u16;
+        let x = term_cols.saturating_sub(width + 1);
+        let y = term_rows.saturating_sub(2);
+        queue!(
+            out,
+            cursor::MoveTo(x, y),
+            style::SetForegroundColor(style::Color::Black),
+            style::SetBackgroundColor(style::Color::Green),
+            style::Print(&padded),
+            style::SetAttribute(style::Attribute::Reset),
+        )?;
+    }
     Ok(())
 }
 

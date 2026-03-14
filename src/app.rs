@@ -36,6 +36,7 @@ pub struct App {
     pub active_window_idx: usize,
     pub sidebar: SidebarState,
     pub selection: Option<Selection>,
+    pub toast: Option<String>,
     next_pane_id: u32,
     input_handler: InputHandler,
     event_tx: mpsc::UnboundedSender<AppEvent>,
@@ -54,6 +55,7 @@ impl App {
             active_window_idx: 0,
             sidebar,
             selection: None,
+            toast: None,
             next_pane_id: 1,
             input_handler: InputHandler::new(config),
             event_tx,
@@ -116,6 +118,10 @@ impl App {
             }
             AppEvent::MouseUp { col, row } => {
                 self.handle_mouse_up(*col, *row);
+                return Ok(true);
+            }
+            AppEvent::ToastExpired => {
+                self.toast = None;
                 return Ok(true);
             }
             AppEvent::ExternalNotification { window, .. } => {
@@ -349,9 +355,19 @@ impl App {
             let text = self.extract_selected_text(sel.normalized());
             if !text.is_empty() {
                 copy_to_clipboard(&text);
+                self.show_toast("Copied!");
             }
         }
         self.selection = None;
+    }
+
+    fn show_toast(&mut self, msg: &str) {
+        self.toast = Some(msg.to_string());
+        let tx = self.event_tx.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            let _ = tx.send(AppEvent::ToastExpired);
+        });
     }
 
     /// 選択範囲のテキストをペインのvt100スクリーンから抽出
