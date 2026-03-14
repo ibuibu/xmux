@@ -81,19 +81,41 @@ impl SidebarState {
             let name = window.display_name();
             let pane_count = window.pane_count();
             let num = i + 1; // 1-indexed
+            let notif = if window.has_notification { " ●" } else { "" };
 
             let line = if pane_count > 1 {
-                format!(" {} {} {} [{}]", marker, num, name, pane_count)
+                format!(" {} {} {} [{}]{}", marker, num, name, pane_count, notif)
             } else {
-                format!(" {} {} {}", marker, num, name)
+                format!(" {} {} {}{}", marker, num, name, notif)
             };
 
-            let line = if line.len() < width - 1 {
-                format!("{:<w$}", line, w = width - 1)
+            if window.has_notification && !is_active {
+                // 通知ありの非アクティブWindow: 名前部分は白、●は黄色
+                let base = if pane_count > 1 {
+                    format!(" {} {} {} [{}]", marker, num, name, pane_count)
+                } else {
+                    format!(" {} {} {}", marker, num, name)
+                };
+                let base_padded = if base.len() < width - 1 {
+                    format!("{:<w$}", base, w = width - 1 - " ●".len())
+                } else {
+                    base[..width.saturating_sub(1 + " ●".len())].to_string()
+                };
+                queue!(out, style::Print(&base_padded))?;
+                queue!(
+                    out,
+                    style::SetForegroundColor(style::Color::Yellow),
+                    style::Print(" ●"),
+                    style::ResetColor
+                )?;
             } else {
-                line[..width - 1].to_string()
-            };
-            queue!(out, style::Print(&line))?;
+                let line = if line.len() < width - 1 {
+                    format!("{:<w$}", line, w = width - 1)
+                } else {
+                    line[..width - 1].to_string()
+                };
+                queue!(out, style::Print(&line))?;
+            }
 
             queue!(
                 out,

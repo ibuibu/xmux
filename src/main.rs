@@ -3,6 +3,7 @@ mod config;
 mod event;
 mod input;
 mod layout;
+mod notification_server;
 mod pane;
 mod render;
 mod sidebar;
@@ -25,6 +26,13 @@ use event::AppEvent;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+
+    // サブコマンド: xmux notify --title "..." --body "..."
+    if args.get(1).map(|s| s.as_str()) == Some("notify") {
+        return send_notification(&args[2..]).await;
+    }
+
     let config = Config::load();
     let mut stdout = stdout();
 
@@ -36,7 +44,74 @@ async fn main() -> anyhow::Result<()> {
     execute!(stdout, DisableMouseCapture, LeaveAlternateScreen)?;
     terminal::disable_raw_mode()?;
 
+    notification_server::cleanup();
+
     result
+}
+
+async fn send_notification(args: &[String]) -> anyhow::Result<()> {
+    use tokio::io::AsyncWriteExt;
+    use tokio::net::UnixStream;
+
+    let mut title = String::new();
+    let mut body = String::new();
+    let mut window: Option<usize> = None;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--title" => {
+                if i + 1 < args.len() {
+                    title = args[i + 1].clone();
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+            "--body" => {
+                if i + 1 < args.len() {
+                    body = args[i + 1].clone();
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+            "--window" => {
+                if i + 1 < args.len() {
+                    window = args[i + 1].parse().ok();
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+            _ => {
+                i += 1;
+            }
+        }
+    }
+
+    // --window未指定の場合、環境変数XMUX_WINDOWから取得
+    if window.is_none() {
+        window = std::env::var("XMUX_WINDOW")
+            .ok()
+            .and_then(|v| v.parse().ok());
+    }
+
+    // windowが特定できない場合はxmuxの外からの呼び出しなので何もしない
+    if window.is_none() {
+        return Ok(());
+    }
+
+    let path = notification_server::socket_path();
+    let mut stream = UnixStream::connect(&path).await?;
+    let mut msg = serde_json::json!({ "title": title, "body": body });
+    if let Some(w) = window {
+        msg["window"] = serde_json::json!(w);
+    }
+    let mut line = msg.to_string();
+    line.push('\n');
+    stream.write_all(line.as_bytes()).await?;
+    Ok(())
 }
 
 async fn run<W: Write>(out: &mut W, config: &Config) -> anyhow::Result<()> {
@@ -44,6 +119,9 @@ async fn run<W: Write>(out: &mut W, config: &Config) -> anyhow::Result<()> {
 
     let mut app = App::new(tx.clone(), config)?;
     app.render(out)?;
+
+    // UDS通知サーバー起動
+    notification_server::start(tx.clone())?;
 
     let input_tx = tx.clone();
     tokio::spawn(async move {

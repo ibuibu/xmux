@@ -12,6 +12,8 @@ pub struct Window {
     pub layout: LayoutNode,
     pub active_pane_id: u32,
     pub zoomed_pane_id: Option<u32>,
+    pub has_notification: bool,
+    pub window_index: usize,
     event_tx: mpsc::UnboundedSender<AppEvent>,
 }
 
@@ -20,9 +22,10 @@ impl Window {
         first_pane_id: u32,
         cols: u16,
         rows: u16,
+        window_index: usize,
         event_tx: mpsc::UnboundedSender<AppEvent>,
     ) -> anyhow::Result<Self> {
-        let (pane, reader) = Pane::new(cols, rows)?;
+        let (pane, reader) = Pane::new(cols, rows, window_index)?;
         let mut panes = HashMap::new();
         panes.insert(first_pane_id, pane);
 
@@ -33,6 +36,8 @@ impl Window {
             layout: LayoutNode::single(first_pane_id),
             active_pane_id: first_pane_id,
             zoomed_pane_id: None,
+            has_notification: false,
+            window_index,
             event_tx,
         })
     }
@@ -75,7 +80,7 @@ impl Window {
                 height: 24,
             });
 
-        let (pane, reader) = Pane::new(new_rect.width, new_rect.height)?;
+        let (pane, reader) = Pane::new(new_rect.width, new_rect.height, self.window_index)?;
         self.panes.insert(new_pane_id, pane);
         spawn_pty_reader(new_pane_id, reader, self.event_tx.clone());
 

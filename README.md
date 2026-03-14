@@ -84,6 +84,38 @@ resize_right = "C-Right"
 - 複数ペインがある場合はペイン数を `[N]` で表示
 - アクティブペインに隣接するボーダーはシアンでハイライト表示
 
+## 通知
+
+外部から `xmux notify` コマンドで通知を送ると、サイドバーに黄色の `●` インジケータが表示される。
+
+```bash
+xmux notify --title "Claude Code" --body "Ready for input"
+```
+
+xmuxはUnix Domain Socket（デフォルト: `$XDG_RUNTIME_DIR/xmux.sock` or `/tmp/xmux.sock`）で通知を受け付ける。環境変数 `XMUX_SOCKET_PATH` でパスを変更可能。
+
+### Claude Code Hooks連携
+
+`~/.claude/settings.json` に以下を追加すると、Claude Codeが入力待ちになった時にxmuxに通知が飛ぶ：
+
+```json
+{
+  "hooks": {
+    "Notification": [
+      {
+        "matcher": "idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "xmux notify --title 'Claude Code' --body 'Ready for input'"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
 ## 開発
 
 ```bash

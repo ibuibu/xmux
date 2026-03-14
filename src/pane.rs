@@ -12,7 +12,11 @@ pub struct Pane {
 }
 
 impl Pane {
-    pub fn new(cols: u16, rows: u16) -> anyhow::Result<(Self, Box<dyn std::io::Read + Send>)> {
+    pub fn new(
+        cols: u16,
+        rows: u16,
+        window_index: usize,
+    ) -> anyhow::Result<(Self, Box<dyn std::io::Read + Send>)> {
         let pty_system = native_pty_system();
 
         let pair = pty_system.openpty(PtySize {
@@ -26,6 +30,7 @@ impl Pane {
         let mut cmd = CommandBuilder::new(&shell);
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
         cmd.cwd(&cwd);
+        cmd.env("XMUX_WINDOW", (window_index + 1).to_string()); // 1-indexed
 
         let child = pair.slave.spawn_command(cmd)?;
         drop(pair.slave);

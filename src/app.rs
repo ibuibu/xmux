@@ -24,7 +24,7 @@ impl App {
         let sidebar = SidebarState::new();
         let pane_cols = term_cols.saturating_sub(sidebar.effective_width());
 
-        let window = Window::new(0, pane_cols, term_rows, event_tx.clone())?;
+        let window = Window::new(0, pane_cols, term_rows, 0, event_tx.clone())?;
 
         Ok(App {
             windows: vec![window],
@@ -83,6 +83,26 @@ impl App {
             }
             AppEvent::MouseClick { col, row } => {
                 self.handle_mouse_click(*col, *row)?;
+                return Ok(true);
+            }
+            AppEvent::ExternalNotification { window, .. } => {
+                match window {
+                    Some(win_num) => {
+                        // 1-indexed → 0-indexed
+                        let idx = win_num.saturating_sub(1);
+                        if idx < self.windows.len() && idx != self.active_window_idx {
+                            self.windows[idx].has_notification = true;
+                        }
+                    }
+                    None => {
+                        // window未指定 → 全非アクティブWindowに通知
+                        for (i, window) in self.windows.iter_mut().enumerate() {
+                            if i != self.active_window_idx {
+                                window.has_notification = true;
+                            }
+                        }
+                    }
+                }
                 return Ok(true);
             }
             _ => {}
@@ -157,6 +177,7 @@ impl App {
             Action::SwitchWindow(idx) => {
                 if idx < self.windows.len() {
                     self.active_window_idx = idx;
+                    self.windows[idx].has_notification = false;
                     let area = self.pane_area()?;
                     self.active_window_mut().resize_all_panes(area)?;
                 }
@@ -187,7 +208,8 @@ impl App {
     fn create_new_window(&mut self) -> anyhow::Result<()> {
         let area = self.pane_area()?;
         let pane_id = self.alloc_pane_id();
-        let window = Window::new(pane_id, area.width, area.height, self.event_tx.clone())?;
+        let idx = self.windows.len();
+        let window = Window::new(pane_id, area.width, area.height, idx, self.event_tx.clone())?;
         self.windows.push(window);
         self.active_window_idx = self.windows.len() - 1;
         Ok(())
@@ -226,6 +248,7 @@ impl App {
                 let idx = (row - 2) as usize;
                 if idx < self.windows.len() {
                     self.active_window_idx = idx;
+                    self.windows[idx].has_notification = false;
                     let area = self.pane_area()?;
                     self.active_window_mut().resize_all_panes(area)?;
                 }
