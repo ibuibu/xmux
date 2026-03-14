@@ -15,8 +15,8 @@ use crossterm::event::{
     DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyEventKind, MouseButton,
     MouseEventKind,
 };
-use crossterm::execute;
 use crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
+use crossterm::{cursor, execute};
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 
@@ -37,11 +37,21 @@ async fn main() -> anyhow::Result<()> {
     let mut stdout = stdout();
 
     terminal::enable_raw_mode()?;
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        EnableMouseCapture,
+        cursor::Hide
+    )?;
 
     let result = run(&mut stdout, &config).await;
 
-    execute!(stdout, DisableMouseCapture, LeaveAlternateScreen)?;
+    execute!(
+        stdout,
+        cursor::Show,
+        DisableMouseCapture,
+        LeaveAlternateScreen
+    )?;
     terminal::disable_raw_mode()?;
 
     notification_server::cleanup();

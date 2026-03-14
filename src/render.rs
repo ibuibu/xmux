@@ -7,7 +7,7 @@ use crate::layout::{Rect, Split};
 pub fn render<W: Write>(out: &mut W, app: &App) -> anyhow::Result<()> {
     let (term_cols, term_rows) = terminal::size()?;
 
-    queue!(out, cursor::Hide, cursor::MoveTo(0, 0))?;
+    queue!(out, cursor::MoveTo(0, 0))?;
 
     // サイドバー描画
     let sidebar_width = app.sidebar.effective_width();
