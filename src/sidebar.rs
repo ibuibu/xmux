@@ -1,7 +1,7 @@
 use crossterm::{cursor, queue, style};
 use std::io::Write;
 
-use crate::pane::Pane;
+use crate::window::Window;
 
 pub const SIDEBAR_WIDTH: u16 = 22;
 
@@ -29,8 +29,8 @@ impl SidebarState {
     pub fn render<W: Write>(
         &self,
         out: &mut W,
-        panes: &[(u32, &Pane)],
-        active_pane_id: u32,
+        windows: &[Window],
+        active_window_idx: usize,
         terminal_height: u16,
     ) -> anyhow::Result<()> {
         if self.collapsed {
@@ -56,8 +56,8 @@ impl SidebarState {
             style::ResetColor
         )?;
 
-        // ペイン一覧
-        for (i, (id, pane)) in panes.iter().enumerate() {
+        // Window一覧
+        for (i, window) in windows.iter().enumerate() {
             let row = 2 + i as u16;
             if row >= terminal_height {
                 break;
@@ -65,7 +65,7 @@ impl SidebarState {
 
             queue!(out, cursor::MoveTo(0, row))?;
 
-            let is_active = *id == active_pane_id;
+            let is_active = i == active_window_idx;
             let marker = if is_active { "►" } else { " " };
 
             if is_active {
@@ -78,15 +78,16 @@ impl SidebarState {
                 queue!(out, style::SetForegroundColor(style::Color::White))?;
             }
 
-            // ペイン名の表示
-            let name = &pane.name;
-            let cwd_display = pane
-                .cwd
-                .file_name()
-                .map(|f| f.to_string_lossy().to_string())
-                .unwrap_or_default();
+            let name = window.display_name();
+            let pane_count = window.pane_count();
+            let num = i + 1; // 1-indexed
 
-            let line = format!(" {} {} {}", marker, id, name);
+            let line = if pane_count > 1 {
+                format!(" {} {} {} [{}]", marker, num, name, pane_count)
+            } else {
+                format!(" {} {} {}", marker, num, name)
+            };
+
             let line = if line.len() < width - 1 {
                 format!("{:<w$}", line, w = width - 1)
             } else {
@@ -94,19 +95,19 @@ impl SidebarState {
             };
             queue!(out, style::Print(&line))?;
 
-            // cwdを2行目に表示（幅に余裕があれば）
-            if !cwd_display.is_empty() {
-                let cwd_row = 2 + panes.len() as u16 + 1 + i as u16;
-                if cwd_row < terminal_height && is_active {
-                    // アクティブペインのcwdだけ下部に表示
-                }
-            }
-
             queue!(
                 out,
                 style::SetAttribute(style::Attribute::Reset),
                 style::ResetColor
             )?;
+        }
+
+        // Window一覧の後ろの行をクリア
+        let list_end = 2 + windows.len() as u16;
+        for row in list_end..terminal_height {
+            queue!(out, cursor::MoveTo(0, row))?;
+            let blank = " ".repeat(width - 1);
+            queue!(out, style::Print(&blank))?;
         }
 
         // サイドバーの右端にボーダー描画

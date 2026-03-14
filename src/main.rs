@@ -6,6 +6,7 @@ mod layout;
 mod pane;
 mod render;
 mod sidebar;
+mod window;
 
 use std::io::{Write, stdout};
 

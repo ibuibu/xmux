@@ -24,6 +24,8 @@ pub enum Action {
     ResizeDown,
     ResizeLeft,
     ResizeRight,
+    NewWindow,
+    SwitchWindow(usize),
     Quit,
     None,
 }
@@ -66,7 +68,11 @@ impl InputHandler {
                     KeyCode::Char('"') => Action::SplitHorizontal,
                     KeyCode::Char('x') => Action::ClosePane,
                     KeyCode::Char('z') => Action::ToggleSidebar,
+                    KeyCode::Char('c') => Action::NewWindow,
                     KeyCode::Char('q') => Action::Quit,
+                    KeyCode::Char(c @ '1'..='9') => {
+                        Action::SwitchWindow((c as usize) - ('1' as usize))
+                    }
                     KeyCode::Up if key.modifiers == KeyModifiers::NONE => Action::FocusUp,
                     KeyCode::Down if key.modifiers == KeyModifiers::NONE => Action::FocusDown,
                     KeyCode::Left if key.modifiers == KeyModifiers::NONE => Action::FocusLeft,
@@ -344,5 +350,28 @@ mod tests {
 
         let action = handler.handle(&make_event(KeyCode::Char('l'), KeyModifiers::NONE));
         assert!(matches!(action, Action::ForwardToPty(ref data) if data == b"l"));
+    }
+
+    #[test]
+    fn prefix_c_creates_new_window() {
+        let mut handler = default_handler();
+        handler.mode = InputMode::Prefix;
+        let action = handler.handle(&make_event(KeyCode::Char('c'), KeyModifiers::NONE));
+        assert!(matches!(action, Action::NewWindow));
+    }
+
+    #[test]
+    fn prefix_number_switches_window() {
+        for (ch, expected_idx) in [('1', 0), ('2', 1), ('9', 8)] {
+            let mut handler = default_handler();
+            handler.mode = InputMode::Prefix;
+            let action = handler.handle(&make_event(KeyCode::Char(ch), KeyModifiers::NONE));
+            assert!(
+                matches!(action, Action::SwitchWindow(idx) if idx == expected_idx),
+                "expected SwitchWindow({}) for '{}'",
+                expected_idx,
+                ch
+            );
+        }
     }
 }

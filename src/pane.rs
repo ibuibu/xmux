@@ -81,4 +81,30 @@ impl Pane {
     pub fn screen(&self) -> &vt100::Screen {
         self.parser.screen()
     }
+
+    /// PTYのフォアグラウンドプロセス名を返す
+    pub fn foreground_process_name(&self) -> String {
+        if let Some(pid) = self.child.process_id() {
+            if let Some(name) = get_foreground_process_name(pid) {
+                return name;
+            }
+        }
+        self.name.clone()
+    }
+}
+
+/// /proc/<pid>/stat からフォアグラウンドプロセスグループのコマンド名を取得
+fn get_foreground_process_name(child_pid: u32) -> Option<String> {
+    let stat = std::fs::read_to_string(format!("/proc/{}/stat", child_pid)).ok()?;
+    // pid (comm) state ppid pgrp session tty_nr tpgid ...
+    // tpgid はfield index 7 (')' の後から数えて index 5)
+    let after_comm = stat.find(')')? + 2;
+    let rest = &stat[after_comm..];
+    let fields: Vec<&str> = rest.split_whitespace().collect();
+    let tpgid: u32 = fields.get(5)?.parse().ok()?;
+    if tpgid == 0 {
+        return None;
+    }
+    let comm = std::fs::read_to_string(format!("/proc/{}/comm", tpgid)).ok()?;
+    Some(comm.trim().to_string())
 }

@@ -137,6 +137,58 @@ impl LayoutNode {
     }
 }
 
+/// ペイン間のボーダー線
+#[derive(Debug, Clone, Copy)]
+pub struct Border {
+    pub x: u16,
+    pub y: u16,
+    pub length: u16,
+    pub orientation: Split, // Vertical = │, Horizontal = ─
+}
+
+impl LayoutNode {
+    /// レイアウトツリーからボーダー位置を計算
+    pub fn compute_borders(&self, area: Rect) -> Vec<Border> {
+        let mut borders = Vec::new();
+        self.compute_borders_inner(area, &mut borders);
+        borders
+    }
+
+    fn compute_borders_inner(&self, area: Rect, borders: &mut Vec<Border>) {
+        if let LayoutNode::Split {
+            direction,
+            ratio,
+            first,
+            second,
+        } = self
+        {
+            let (first_area, second_area) = split_rect(area, *direction, *ratio);
+            match direction {
+                Split::Vertical => {
+                    // 縦線: first_area の右端 + 1 の位置
+                    borders.push(Border {
+                        x: first_area.x + first_area.width,
+                        y: area.y,
+                        length: area.height,
+                        orientation: Split::Vertical,
+                    });
+                }
+                Split::Horizontal => {
+                    // 横線: first_area の下端 + 1 の位置
+                    borders.push(Border {
+                        x: area.x,
+                        y: first_area.y + first_area.height,
+                        length: area.width,
+                        orientation: Split::Horizontal,
+                    });
+                }
+            }
+            first.compute_borders_inner(first_area, borders);
+            second.compute_borders_inner(second_area, borders);
+        }
+    }
+}
+
 pub fn split_rect(area: Rect, direction: Split, ratio: f32) -> (Rect, Rect) {
     match direction {
         Split::Vertical => {
@@ -336,5 +388,45 @@ mod tests {
         layout.split_pane(5, 10, Split::Vertical);
         layout.split_pane(10, 15, Split::Horizontal);
         assert_eq!(layout.first_pane_id(), 5);
+    }
+
+    #[test]
+    fn no_borders_for_single_pane() {
+        let layout = LayoutNode::single(0);
+        let borders = layout.compute_borders(area(0, 0, 80, 40));
+        assert!(borders.is_empty());
+    }
+
+    #[test]
+    fn vertical_split_has_one_vertical_border() {
+        let mut layout = LayoutNode::single(0);
+        layout.split_pane(0, 1, Split::Vertical);
+        let borders = layout.compute_borders(area(0, 0, 101, 50));
+        assert_eq!(borders.len(), 1);
+        assert_eq!(borders[0].orientation, Split::Vertical);
+        assert_eq!(borders[0].x, 50); // first half is 50 cols wide
+        assert_eq!(borders[0].y, 0);
+        assert_eq!(borders[0].length, 50);
+    }
+
+    #[test]
+    fn horizontal_split_has_one_horizontal_border() {
+        let mut layout = LayoutNode::single(0);
+        layout.split_pane(0, 1, Split::Horizontal);
+        let borders = layout.compute_borders(area(0, 0, 80, 41));
+        assert_eq!(borders.len(), 1);
+        assert_eq!(borders[0].orientation, Split::Horizontal);
+        assert_eq!(borders[0].y, 20);
+        assert_eq!(borders[0].x, 0);
+        assert_eq!(borders[0].length, 80);
+    }
+
+    #[test]
+    fn nested_split_has_two_borders() {
+        let mut layout = LayoutNode::single(0);
+        layout.split_pane(0, 1, Split::Vertical);
+        layout.split_pane(1, 2, Split::Horizontal);
+        let borders = layout.compute_borders(area(0, 0, 101, 50));
+        assert_eq!(borders.len(), 2);
     }
 }

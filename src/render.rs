@@ -2,7 +2,7 @@ use crossterm::{cursor, queue, style, terminal};
 use std::io::Write;
 
 use crate::app::App;
-use crate::layout::Rect;
+use crate::layout::{Rect, Split};
 
 pub fn render<W: Write>(out: &mut W, app: &App) -> anyhow::Result<()> {
     let (term_cols, term_rows) = terminal::size()?;
@@ -11,15 +11,8 @@ pub fn render<W: Write>(out: &mut W, app: &App) -> anyhow::Result<()> {
 
     // サイドバー描画
     let sidebar_width = app.sidebar.effective_width();
-    let pane_list: Vec<(u32, &crate::pane::Pane)> = app
-        .layout
-        .pane_ids()
-        .iter()
-        .filter_map(|id| app.panes.get(id).map(|p| (*id, p)))
-        .collect();
-
     app.sidebar
-        .render(out, &pane_list, app.active_pane_id, term_rows)?;
+        .render(out, &app.windows, app.active_window_idx, term_rows)?;
 
     // ペイン領域の矩形を計算
     let pane_area = Rect {
@@ -29,19 +22,47 @@ pub fn render<W: Write>(out: &mut W, app: &App) -> anyhow::Result<()> {
         height: term_rows,
     };
 
-    let rects = app.layout.compute_rects(pane_area);
+    let window = &app.windows[app.active_window_idx];
+    let rects = window.layout.compute_rects(pane_area);
 
     // 各ペインの描画
     for (pane_id, rect) in &rects {
-        if let Some(pane) = app.panes.get(pane_id) {
+        if let Some(pane) = window.panes.get(pane_id) {
             render_pane(out, pane, *rect)?;
         }
     }
 
+    // ペイン間のボーダー描画
+    let borders = window.layout.compute_borders(pane_area);
+    queue!(out, style::SetForegroundColor(style::Color::DarkGrey))?;
+    for border in &borders {
+        match border.orientation {
+            Split::Vertical => {
+                for i in 0..border.length {
+                    queue!(
+                        out,
+                        cursor::MoveTo(border.x, border.y + i),
+                        style::Print("│")
+                    )?;
+                }
+            }
+            Split::Horizontal => {
+                for i in 0..border.length {
+                    queue!(
+                        out,
+                        cursor::MoveTo(border.x + i, border.y),
+                        style::Print("─")
+                    )?;
+                }
+            }
+        }
+    }
+    queue!(out, style::ResetColor)?;
+
     // アクティブペインのカーソル位置にカーソルを表示
-    if let Some(active_rect) = rects.iter().find(|(id, _)| *id == app.active_pane_id) {
+    if let Some(active_rect) = rects.iter().find(|(id, _)| *id == window.active_pane_id) {
         let rect = active_rect.1;
-        if let Some(pane) = app.panes.get(&app.active_pane_id) {
+        if let Some(pane) = window.panes.get(&window.active_pane_id) {
             let screen = pane.screen();
             let cursor_pos = screen.cursor_position();
             let cx = rect.x + cursor_pos.1;
@@ -68,7 +89,6 @@ fn render_pane<W: Write>(out: &mut W, pane: &crate::pane::Pane, rect: Rect) -> a
                 let cell = screen.cell(row, col);
                 match cell {
                     Some(cell) => {
-                        // 前景色
                         let fg = convert_color(cell.fgcolor());
                         let bg = convert_color(cell.bgcolor());
                         queue!(out, style::SetForegroundColor(fg))?;
@@ -86,7 +106,6 @@ fn render_pane<W: Write>(out: &mut W, pane: &crate::pane::Pane, rect: Rect) -> a
                             queue!(out, style::Print(' '))?;
                         } else {
                             queue!(out, style::Print(&contents))?;
-                            // ワイド文字なら次のカラムをスキップ
                             let width = unicode_width::UnicodeWidthStr::width(contents.as_str());
                             if width > 1 {
                                 col += width as u16 - 1;
@@ -101,7 +120,6 @@ fn render_pane<W: Write>(out: &mut W, pane: &crate::pane::Pane, rect: Rect) -> a
                 }
                 col += 1;
             }
-            // 残りをスペースで埋める
             let remaining = rect.width.saturating_sub(col);
             if remaining > 0 {
                 queue!(out, style::Print(" ".repeat(remaining as usize)))?;
