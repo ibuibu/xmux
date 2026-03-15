@@ -32,11 +32,7 @@ pub fn render<W: Write>(out: &mut W, app: &App) -> anyhow::Result<()> {
         if let Some(pane) = window.panes.get(&zoomed_id) {
             render_pane(out, pane, pane_area, selection)?;
             render_toast(out, &app.toast, term_cols, term_rows)?;
-            let screen = pane.screen();
-            let cursor_pos = screen.cursor_position();
-            let cx = pane_area.x + cursor_pos.1.min(pane_area.width.saturating_sub(1));
-            let cy = pane_area.y + cursor_pos.0.min(pane_area.height.saturating_sub(1));
-            queue!(out, cursor::MoveTo(cx, cy), cursor::Show)?;
+            render_block_cursor(out, pane, pane_area)?;
         }
         out.flush()?;
         return Ok(());
@@ -150,19 +146,80 @@ pub fn render<W: Write>(out: &mut W, app: &App) -> anyhow::Result<()> {
     // トースト描画
     render_toast(out, &app.toast, term_cols, term_rows)?;
 
-    // アクティブペインのカーソル位置にカーソルを表示
+    // アクティブペインのブロックカーソル描画
     if let Some(active_rect) = rects.iter().find(|(id, _)| *id == window.active_pane_id) {
         let rect = active_rect.1;
         if let Some(pane) = window.panes.get(&window.active_pane_id) {
-            let screen = pane.screen();
-            let cursor_pos = screen.cursor_position();
-            let cx = rect.x + cursor_pos.1.min(rect.width.saturating_sub(1));
-            let cy = rect.y + cursor_pos.0.min(rect.height.saturating_sub(1));
-            queue!(out, cursor::MoveTo(cx, cy), cursor::Show)?;
+            render_block_cursor(out, pane, rect)?;
         }
     }
 
     out.flush()?;
+    Ok(())
+}
+
+/// カーソル位置のセルを反転色で描画（ブロックカーソル）
+fn render_block_cursor<W: Write>(
+    out: &mut W,
+    pane: &crate::pane::Pane,
+    rect: Rect,
+) -> anyhow::Result<()> {
+    let screen = pane.screen();
+    let cursor_pos = screen.cursor_position();
+    let row = cursor_pos.0;
+    let col = cursor_pos.1;
+
+    // hide_cursor=trueのTUIアプリはアプリ側でカーソルを描画するので何もしない
+    if screen.hide_cursor() {
+        return Ok(());
+    }
+
+    if row >= rect.height || col >= rect.width {
+        return Ok(());
+    }
+
+    let cx = rect.x + col;
+    let cy = rect.y + row;
+
+    let cell = screen.cell(row, col);
+    let (ch, fg, bg) = match cell {
+        Some(cell) => {
+            let contents = cell.contents();
+            let ch = if contents.is_empty() {
+                " ".to_string()
+            } else {
+                contents
+            };
+            (
+                ch,
+                convert_color(cell.fgcolor()),
+                convert_color(cell.bgcolor()),
+            )
+        }
+        None => (" ".to_string(), style::Color::Reset, style::Color::Reset),
+    };
+
+    // fg/bgを反転して描画
+    let display_fg = if bg == style::Color::Reset {
+        style::Color::Black
+    } else {
+        bg
+    };
+    let display_bg = if fg == style::Color::Reset {
+        style::Color::White
+    } else {
+        fg
+    };
+
+    queue!(
+        out,
+        cursor::MoveTo(cx, cy),
+        style::SetForegroundColor(display_fg),
+        style::SetBackgroundColor(display_bg),
+        style::Print(&ch),
+        style::SetAttribute(style::Attribute::Reset),
+    )?;
+
     Ok(())
 }
 
@@ -222,8 +279,14 @@ fn render_pane<W: Write>(
                         if cell.bold() {
                             queue!(out, style::SetAttribute(style::Attribute::Bold))?;
                         }
+                        if cell.italic() {
+                            queue!(out, style::SetAttribute(style::Attribute::Italic))?;
+                        }
                         if cell.underline() {
                             queue!(out, style::SetAttribute(style::Attribute::Underlined))?;
+                        }
+                        if cell.inverse() {
+                            queue!(out, style::SetAttribute(style::Attribute::Reverse))?;
                         }
 
                         let contents = cell.contents();
