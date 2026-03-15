@@ -66,6 +66,7 @@ async fn send_notification(args: &[String]) -> anyhow::Result<()> {
     let mut title = String::new();
     let mut body = String::new();
     let mut window: Option<usize> = None;
+    let mut pane: Option<u32> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -94,17 +95,28 @@ async fn send_notification(args: &[String]) -> anyhow::Result<()> {
                     i += 1;
                 }
             }
+            "--pane" => {
+                if i + 1 < args.len() {
+                    pane = args[i + 1].parse().ok();
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
             _ => {
                 i += 1;
             }
         }
     }
 
-    // --window未指定の場合、環境変数XMUX_WINDOWから取得
+    // 未指定の場合、環境変数から取得
     if window.is_none() {
         window = std::env::var("XMUX_WINDOW")
             .ok()
             .and_then(|v| v.parse().ok());
+    }
+    if pane.is_none() {
+        pane = std::env::var("XMUX_PANE").ok().and_then(|v| v.parse().ok());
     }
 
     // windowが特定できない場合はxmuxの外からの呼び出しなので何もしない
@@ -117,6 +129,9 @@ async fn send_notification(args: &[String]) -> anyhow::Result<()> {
     let mut msg = serde_json::json!({ "title": title, "body": body });
     if let Some(w) = window {
         msg["window"] = serde_json::json!(w);
+    }
+    if let Some(p) = pane {
+        msg["pane"] = serde_json::json!(p);
     }
     let mut line = msg.to_string();
     line.push('\n');

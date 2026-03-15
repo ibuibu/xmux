@@ -46,10 +46,13 @@ pub fn start(tx: mpsc::UnboundedSender<AppEvent>) -> anyhow::Result<()> {
                                     .get("window")
                                     .and_then(|v| v.as_u64())
                                     .map(|v| v as usize);
+                                let pane =
+                                    msg.get("pane").and_then(|v| v.as_u64()).map(|v| v as u32);
                                 let _ = tx.send(AppEvent::ExternalNotification {
                                     title,
                                     body,
                                     window,
+                                    pane,
                                 });
                             }
                         }

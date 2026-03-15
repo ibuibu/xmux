@@ -25,7 +25,7 @@ impl Window {
         window_index: usize,
         event_tx: mpsc::UnboundedSender<AppEvent>,
     ) -> anyhow::Result<Self> {
-        let (pane, reader) = Pane::new(cols, rows, window_index)?;
+        let (pane, reader) = Pane::new(cols, rows, window_index, first_pane_id)?;
         let mut panes = HashMap::new();
         panes.insert(first_pane_id, pane);
 
@@ -80,7 +80,12 @@ impl Window {
                 height: 24,
             });
 
-        let (pane, reader) = Pane::new(new_rect.width, new_rect.height, self.window_index)?;
+        let (pane, reader) = Pane::new(
+            new_rect.width,
+            new_rect.height,
+            self.window_index,
+            new_pane_id,
+        )?;
         self.panes.insert(new_pane_id, pane);
         spawn_pty_reader(new_pane_id, reader, self.event_tx.clone());
 

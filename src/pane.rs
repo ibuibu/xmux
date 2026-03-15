@@ -9,6 +9,7 @@ pub struct Pane {
     pub parser: vt100::Parser,
     pub cols: u16,
     pub rows: u16,
+    pub has_notification: bool,
 }
 
 impl Pane {
@@ -16,6 +17,7 @@ impl Pane {
         cols: u16,
         rows: u16,
         window_index: usize,
+        pane_id: u32,
     ) -> anyhow::Result<(Self, Box<dyn std::io::Read + Send>)> {
         let pty_system = native_pty_system();
 
@@ -31,6 +33,7 @@ impl Pane {
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
         cmd.cwd(&cwd);
         cmd.env("XMUX_WINDOW", (window_index + 1).to_string()); // 1-indexed
+        cmd.env("XMUX_PANE", pane_id.to_string());
 
         let child = pair.slave.spawn_command(cmd)?;
         drop(pair.slave);
@@ -47,6 +50,7 @@ impl Pane {
             parser,
             cols,
             rows,
+            has_notification: false,
         };
 
         Ok((pane, reader))

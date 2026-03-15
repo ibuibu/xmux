@@ -7,7 +7,7 @@ use crate::layout::{Rect, Split};
 pub fn render<W: Write>(out: &mut W, app: &App) -> anyhow::Result<()> {
     let (term_cols, term_rows) = terminal::size()?;
 
-    queue!(out, cursor::MoveTo(0, 0))?;
+    queue!(out, cursor::Hide, cursor::MoveTo(0, 0))?;
 
     // サイドバー描画
     let sidebar_width = app.sidebar.effective_width();
@@ -53,7 +53,7 @@ pub fn render<W: Write>(out: &mut W, app: &App) -> anyhow::Result<()> {
         }
     }
 
-    // ペイン間のボーダー描画（セル単位でアクティブ判定）
+    // ペイン間のボーダー描画（セル単位でアクティブ/通知判定）
     let borders = window.layout.compute_borders(pane_area);
     let active_rect = rects
         .iter()
@@ -71,17 +71,36 @@ pub fn render<W: Write>(out: &mut W, app: &App) -> anyhow::Result<()> {
                             touches_x && in_y
                         })
                         .unwrap_or(false);
-                    let color = if is_active {
-                        style::Color::Cyan
+                    let has_notif = rects.iter().any(|(id, r)| {
+                        let touches_x = r.x + r.width == border.x || r.x == border.x + 1;
+                        let in_y = by >= r.y && by < r.y + r.height;
+                        touches_x
+                            && in_y
+                            && *id != window.active_pane_id
+                            && window.panes.get(id).map_or(false, |p| p.has_notification)
+                    });
+                    if has_notif {
+                        queue!(
+                            out,
+                            cursor::MoveTo(border.x, by),
+                            style::SetAttribute(style::Attribute::Bold),
+                            style::SetForegroundColor(style::Color::Yellow),
+                            style::Print("┃"),
+                            style::SetAttribute(style::Attribute::Reset),
+                        )?;
                     } else {
-                        style::Color::DarkGrey
-                    };
-                    queue!(
-                        out,
-                        cursor::MoveTo(border.x, by),
-                        style::SetForegroundColor(color),
-                        style::Print("│")
-                    )?;
+                        let color = if is_active {
+                            style::Color::Cyan
+                        } else {
+                            style::Color::DarkGrey
+                        };
+                        queue!(
+                            out,
+                            cursor::MoveTo(border.x, by),
+                            style::SetForegroundColor(color),
+                            style::Print("│"),
+                        )?;
+                    }
                 }
             }
             Split::Horizontal => {
@@ -94,17 +113,36 @@ pub fn render<W: Write>(out: &mut W, app: &App) -> anyhow::Result<()> {
                             touches_y && in_x
                         })
                         .unwrap_or(false);
-                    let color = if is_active {
-                        style::Color::Cyan
+                    let has_notif = rects.iter().any(|(id, r)| {
+                        let touches_y = r.y + r.height == border.y || r.y == border.y + 1;
+                        let in_x = bx >= r.x && bx < r.x + r.width;
+                        touches_y
+                            && in_x
+                            && *id != window.active_pane_id
+                            && window.panes.get(id).map_or(false, |p| p.has_notification)
+                    });
+                    if has_notif {
+                        queue!(
+                            out,
+                            cursor::MoveTo(bx, border.y),
+                            style::SetAttribute(style::Attribute::Bold),
+                            style::SetForegroundColor(style::Color::Yellow),
+                            style::Print("━"),
+                            style::SetAttribute(style::Attribute::Reset),
+                        )?;
                     } else {
-                        style::Color::DarkGrey
-                    };
-                    queue!(
-                        out,
-                        cursor::MoveTo(bx, border.y),
-                        style::SetForegroundColor(color),
-                        style::Print("─")
-                    )?;
+                        let color = if is_active {
+                            style::Color::Cyan
+                        } else {
+                            style::Color::DarkGrey
+                        };
+                        queue!(
+                            out,
+                            cursor::MoveTo(bx, border.y),
+                            style::SetForegroundColor(color),
+                            style::Print("─"),
+                        )?;
+                    }
                 }
             }
         }

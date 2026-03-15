@@ -32,6 +32,7 @@ pub enum AppEvent {
         #[allow(dead_code)]
         body: String,
         window: Option<usize>,
+        pane: Option<u32>,
     },
     ToastExpired,
 }

@@ -124,17 +124,26 @@ impl App {
                 self.toast = None;
                 return Ok(true);
             }
-            AppEvent::ExternalNotification { window, .. } => {
+            AppEvent::ExternalNotification { window, pane, .. } => {
                 match window {
                     Some(win_num) => {
                         // 1-indexed → 0-indexed
                         let idx = win_num.saturating_sub(1);
-                        if idx < self.windows.len() && idx != self.active_window_idx {
-                            self.windows[idx].has_notification = true;
+                        if idx < self.windows.len() {
+                            let win = &mut self.windows[idx];
+                            // ペイン指定があればペイン単位で通知
+                            if let Some(pane_id) = pane {
+                                if let Some(p) = win.panes.get_mut(pane_id) {
+                                    p.has_notification = true;
+                                }
+                            }
+                            // サイドバー用: アクティブwindow以外ならwindow通知も立てる
+                            if idx != self.active_window_idx {
+                                win.has_notification = true;
+                            }
                         }
                     }
                     None => {
-                        // window未指定 → 全非アクティブWindowに通知
                         for (i, window) in self.windows.iter_mut().enumerate() {
                             if i != self.active_window_idx {
                                 window.has_notification = true;
@@ -153,7 +162,17 @@ impl App {
             Action::ForwardToPty(data) => {
                 let active_pane_id = self.active_window().active_pane_id;
                 if let Some(pane) = self.active_window_mut().panes.get_mut(&active_pane_id) {
+                    pane.has_notification = false;
                     pane.write_to_pty(&data)?;
+                }
+                // 全ペインの通知が消えたらwindow通知もクリア
+                if !self
+                    .active_window()
+                    .panes
+                    .values()
+                    .any(|p| p.has_notification)
+                {
+                    self.active_window_mut().has_notification = false;
                 }
             }
             Action::SplitVertical => {
@@ -216,7 +235,6 @@ impl App {
             Action::SwitchWindow(idx) => {
                 if idx < self.windows.len() {
                     self.active_window_idx = idx;
-                    self.windows[idx].has_notification = false;
                     let area = self.pane_area()?;
                     self.active_window_mut().resize_all_panes(area)?;
                 }
@@ -287,7 +305,6 @@ impl App {
                 let idx = (row - 2) as usize;
                 if idx < self.windows.len() {
                     self.active_window_idx = idx;
-                    self.windows[idx].has_notification = false;
                     let area = self.pane_area()?;
                     self.active_window_mut().resize_all_panes(area)?;
                 }
