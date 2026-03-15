@@ -34,11 +34,9 @@ pub fn render<W: Write>(out: &mut W, app: &App) -> anyhow::Result<()> {
             render_toast(out, &app.toast, term_cols, term_rows)?;
             let screen = pane.screen();
             let cursor_pos = screen.cursor_position();
-            let cx = pane_area.x + cursor_pos.1;
-            let cy = pane_area.y + cursor_pos.0;
-            if cx < pane_area.x + pane_area.width && cy < pane_area.y + pane_area.height {
-                queue!(out, cursor::MoveTo(cx, cy), cursor::Show)?;
-            }
+            let cx = pane_area.x + cursor_pos.1.min(pane_area.width.saturating_sub(1));
+            let cy = pane_area.y + cursor_pos.0.min(pane_area.height.saturating_sub(1));
+            queue!(out, cursor::MoveTo(cx, cy), cursor::Show)?;
         }
         out.flush()?;
         return Ok(());
@@ -158,11 +156,9 @@ pub fn render<W: Write>(out: &mut W, app: &App) -> anyhow::Result<()> {
         if let Some(pane) = window.panes.get(&window.active_pane_id) {
             let screen = pane.screen();
             let cursor_pos = screen.cursor_position();
-            let cx = rect.x + cursor_pos.1;
-            let cy = rect.y + cursor_pos.0;
-            if cx < rect.x + rect.width && cy < rect.y + rect.height {
-                queue!(out, cursor::MoveTo(cx, cy), cursor::Show)?;
-            }
+            let cx = rect.x + cursor_pos.1.min(rect.width.saturating_sub(1));
+            let cy = rect.y + cursor_pos.0.min(rect.height.saturating_sub(1));
+            queue!(out, cursor::MoveTo(cx, cy), cursor::Show)?;
         }
     }
 

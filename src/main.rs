@@ -192,6 +192,15 @@ async fn run<W: Write>(out: &mut W, config: &Config) -> anyhow::Result<()> {
         if !should_continue {
             break;
         }
+        // 溜まったイベントをすべて処理してから描画（イベントコアレッシング）
+        while let Ok(event) = rx.try_recv() {
+            let should_continue = app.update(event)?;
+            if !should_continue {
+                // flush前に抜ける
+                app.render(out)?;
+                return Ok(());
+            }
+        }
         app.render(out)?;
     }
 
